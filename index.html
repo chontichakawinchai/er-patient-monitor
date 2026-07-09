@@ -65,6 +65,10 @@
   .note-tpl-row{display:flex;flex-wrap:wrap;gap:5px;}
   .trend-up{color:var(--red);font-weight:700;}
   .trend-down{color:var(--red);font-weight:700;}
+  .cell-green{background:#a5d6a7 !important;color:#0d3d12 !important;font-weight:600;}
+  .cell-orange{background:#ffcc80 !important;color:#4a2600 !important;font-weight:700;}
+  .cell-red{background:#ef9a9a !important;color:#4a0000 !important;font-weight:700;}
+  .row-deceased, .row-deceased td{background:#212121 !important;color:#ffffff !important;}
   tr.tri-R{background:#e57373;}
   tr.tri-R td{color:#4a0000;}
   tr.tri-E{background:#ffab40;}
@@ -318,6 +322,26 @@
   </div>
 </div>
 
+<!-- QUICK TRIAGE CHANGE MODAL -->
+<div class="modal-overlay" id="modalQuickTriage">
+  <div class="modal" style="max-width:380px;">
+    <button class="close-x" data-close="modalQuickTriage">✕</button>
+    <h2 id="qtPatientName" style="font-size:16px;"></h2>
+    <label style="font-size:12px;font-weight:600;color:var(--muted);">เปลี่ยน Triage เป็น</label>
+    <select id="qtTriageType" style="width:100%;margin:6px 0 14px;font-size:16px;padding:10px;">
+      <option value="R">R - Resuscitation</option>
+      <option value="E">E - Emergency</option>
+      <option value="U">U - Urgent</option>
+      <option value="SU">SU - Semi-urgent</option>
+      <option value="N">N - Non-urgent</option>
+    </select>
+    <div class="modal-actions">
+      <button class="btn btn-outline" data-close="modalQuickTriage">ยกเลิก</button>
+      <button class="btn btn-primary" id="btnSaveQuickTriage">บันทึก</button>
+    </div>
+  </div>
+</div>
+
 <!-- DISCHARGE MODAL -->
 <div class="modal-overlay" id="modalDischarge">
   <div class="modal" style="max-width:460px;">
@@ -383,6 +407,7 @@
       </select></label>
       <label>ผู้บันทึก<select id="eaRecordedBy"><option value="">- เลือกผู้บันทึก -</option></select></label>
     </div>
+    <div id="eaTypoWarning" style="display:none;background:#ff6d00;border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:13px;color:#000;font-weight:700;"></div>
     <label style="font-size:12px;color:var(--muted);font-weight:600;">Data / Assessment / Intervention / Evaluation</label>
     <textarea id="eaNotes" rows="3" style="width:100%;margin-top:4px;"></textarea>
     <select id="eaNoteCategory" style="width:100%;margin-top:6px;"></select>
@@ -664,6 +689,18 @@ document.getElementById('eaNoteCategory').addEventListener('change', ()=>{
   renderNoteTemplates('eaNoteTemplates','eaNotes', document.getElementById('eaRR').value, 'eaNoteCategory');
 });
 
+function checkImplausibleVitals(temp, hr, rr, spo2, bpStr){
+  const warnings = [];
+  const t = Number(temp), h = Number(hr), r = Number(rr), s = Number(spo2);
+  const { sbp } = extractSBPDBP(bpStr);
+  if(temp!=='' && !isNaN(t) && (t>45 || t<25)) warnings.push(`Temp ${temp}°C ดูผิดปกติมาก (อาจพิมพ์ตกจุดทศนิยม เช่น 37.5 ไม่ใช่ 375)`);
+  if(hr!=='' && !isNaN(h) && h>250) warnings.push(`PR ${hr} bpm สูงผิดปกติมาก (ตรวจสอบการพิมพ์)`);
+  if(rr!=='' && !isNaN(r) && r>80) warnings.push(`RR ${rr} /min สูงผิดปกติมาก (ตรวจสอบการพิมพ์)`);
+  if(spo2!=='' && !isNaN(s) && s>100) warnings.push(`SpO2 ${spo2}% เกิน 100% (ตรวจสอบการพิมพ์)`);
+  if(sbp!==null && sbp>300) warnings.push(`SBP ${sbp} mmHg สูงผิดปกติมาก (ตรวจสอบการพิมพ์)`);
+  return warnings;
+}
+
 function computeNEWS2AndAlerts(){
   const temp = document.getElementById('fTemp').value;
   const bp = document.getElementById('fBP').value;
@@ -713,11 +750,18 @@ function computeNEWS2AndAlerts(){
 
   const box = document.getElementById('vitalAlerts');
   const newsHigh = total!=='' && Number(total) > 5;
-  if(newsHigh || mapLow || alerts.length>=2){
+  const typoWarnings = checkImplausibleVitals(temp, pr, rr, spo2, bp);
+  if(typoWarnings.length){
     box.style.display='';
+    box.style.background = '#ff6d00';
+    box.innerHTML = '⚠️ ตรวจสอบการพิมพ์ (ค่าดูผิดปกติทางร่างกาย):<br>' + typoWarnings.map(a=>'• '+a).join('<br>');
+  } else if(newsHigh || mapLow || alerts.length>=2){
+    box.style.display='';
+    box.style.background = '#ff1744';
     box.innerHTML = '⚠ พบสัญญาณชีพผิดปกติ:<br>' + alerts.map(a=>'• '+a).join('<br>') + (newsHigh ? '<br>• NEWS2 รวม '+total+' คะแนน (สูง กว่า 5) ควรแจ้งแพทย์ทันที' : '');
   } else if(alerts.length>0){
     box.style.display='';
+    box.style.background = '#ff1744';
     box.innerHTML = '⚠ ' + alerts.join(' | ');
   } else {
     box.style.display='none';
@@ -814,8 +858,9 @@ function renderShiftList(){
   patients.forEach(p=>{
     const status = p.Status || 'active';
     const detail = status==='active' ? '-' : `${dispositionStatusLabel_(p.DischargeStatus||status)}${p.Disposition ? ' - '+p.Disposition : ''}`;
+    const isDeceased = p.DischargeStatus === 'deceased';
     const tr = document.createElement('tr');
-    tr.className = `tri-${triageClass(p.TriageType)}`;
+    tr.className = isDeceased ? 'row-deceased' : `tri-${triageClass(p.TriageType)}`;
     tr.innerHTML = `
       <td>${p.HN||'-'}</td>
       <td>${p.Name||'-'}</td>
@@ -945,6 +990,7 @@ function openEditAssessmentModal(a){
   document.getElementById('eaNotes').value = a.Notes||'';
   renderNoteTemplates('eaNoteTemplates','eaNotes', a.RR||'', 'eaNoteCategory');
   populateRecordedBySelect(document.getElementById('eaRecordedBy'), a.RecordedBy||'');
+  checkEaTypoWarning();
   openModal('modalEditAssessment');
 }
 
@@ -1077,7 +1123,7 @@ function renderWard(){
       <td>${lastTime}${overdueLabel}</td>
       <td>
         <button class="btn btn-primary btn-sm" data-open="${p.VN}">เปิด/บันทึก</button>
-        <button class="btn btn-outline btn-sm" data-edit="${p.VN}" style="margin-left:4px;">แก้ไข</button>
+        <button class="btn btn-outline btn-sm" data-edit="${p.VN}" style="margin-left:4px;">เปลี่ยน Triage</button>
       </td>
     `;
     body.appendChild(tr);
@@ -1087,7 +1133,7 @@ function renderWard(){
     btn.addEventListener('click', ()=>openPatient(btn.dataset.open));
   });
   body.querySelectorAll('[data-edit]').forEach(btn=>{
-    btn.addEventListener('click', ()=>openPatient(btn.dataset.edit));
+    btn.addEventListener('click', ()=>openQuickTriageModal(btn.dataset.edit));
   });
 }
 
@@ -1153,18 +1199,58 @@ async function openPatient(vn){
   }catch(err){ toast('โหลดข้อมูลผู้ป่วยไม่สำเร็จ', true); }
 }
 
-function trendArrow(curr, prev){
+function trendArrow(curr, prev, threshold){
   if(curr===''||curr===undefined||prev===''||prev===undefined) return '';
   const c = Number(curr), p = Number(prev);
-  if(isNaN(c)||isNaN(p)||c===p) return '';
-  return c>p ? ' <span class="trend-up">▲</span>' : ' <span class="trend-down">▼</span>';
+  if(isNaN(c)||isNaN(p)) return '';
+  const diff = c - p;
+  if(Math.abs(diff) < threshold) return '';
+  return diff>0 ? ' <span class="trend-up">▲</span>' : ' <span class="trend-down">▼</span>';
 }
 
-function trendArrowGcs(curr, prev){
-  if(curr===''||curr===undefined||prev===''||prev===undefined) return '';
-  const c = Number(curr), p = Number(prev);
-  if(isNaN(c)||isNaN(p)||c===p) return '';
-  return c<p ? ' <span class="trend-down">▼</span>' : ' <span class="trend-up">▲</span>';
+function arrowUp(){ return ' <span class="trend-up">▲</span>'; }
+function arrowDown(){ return ' <span class="trend-down">▼</span>'; }
+
+function arrowForRR(rr){
+  if(rr==='' || rr===undefined) return '';
+  const n = Number(rr); if(isNaN(n)) return '';
+  if(!scoreRR(rr)) return '';
+  return n<12 ? arrowDown() : arrowUp();
+}
+function arrowForSpO2(spo2){
+  if(spo2==='' || spo2===undefined) return '';
+  if(!scoreSpO2(spo2)) return '';
+  return arrowDown();
+}
+function arrowForSBP(bpStr){
+  const m = String(bpStr||'').match(/(\d+)\//);
+  if(!m) return '';
+  if(!scoreSBP(bpStr)) return '';
+  return Number(m[1]) < 111 ? arrowDown() : arrowUp();
+}
+function arrowForPR(pr){
+  if(pr==='' || pr===undefined) return '';
+  const n = Number(pr); if(isNaN(n)) return '';
+  if(!scorePR(pr)) return '';
+  return n<91 ? arrowDown() : arrowUp();
+}
+function arrowForTemp(temp){
+  if(temp==='' || temp===undefined) return '';
+  const n = Number(temp); if(isNaN(n)) return '';
+  if(!scoreTemp(temp)) return '';
+  return n<36.1 ? arrowDown() : arrowUp();
+}
+function arrowForNews(news){
+  if(news==='' || news===undefined) return '';
+  const n = Number(news); if(isNaN(n)) return '';
+  return n>0 ? arrowUp() : '';
+}
+
+function cellSeverityClass(score){
+  if(score===null || score===undefined) return '';
+  if(score>=2) return 'cell-red';
+  if(score===1) return 'cell-orange';
+  return 'cell-green';
 }
 
 function renderPatientDetail(){
@@ -1175,18 +1261,22 @@ function renderPatientDetail(){
   const body = document.getElementById('histBody');
   body.innerHTML = '';
   state.currentAssessments.forEach((a,idx)=>{
-    const prev = idx>0 ? state.currentAssessments[idx-1] : null;
     const tr = document.createElement('tr');
+    const tempCls = a.Temp!=='' ? cellSeverityClass(scoreTemp(a.Temp)) : '';
+    const bpCls = a.BP!=='' ? cellSeverityClass(scoreSBP(a.BP)) : '';
+    const prCls = a.PR!=='' ? cellSeverityClass(scorePR(a.PR)) : '';
+    const rrCls = a.RR!=='' ? cellSeverityClass(scoreRR(a.RR)) : '';
+    const spo2Cls = a.SpO2!=='' ? cellSeverityClass(scoreSpO2(a.SpO2)) : '';
     tr.innerHTML = `
       <td>${fmtTime(a.Timestamp)}</td>
-      <td>${a.Temp||'-'}</td>
-      <td>${a.BP||'-'}${prev?trendArrow((String(a.BP||'').match(/(\d+)\//)||[])[1], (String(prev.BP||'').match(/(\d+)\//)||[])[1]):''}</td>
-      <td>${a.PR||'-'}${prev?trendArrow(a.PR,prev.PR):''}</td>
-      <td>${a.RR||'-'}${prev?trendArrow(a.RR,prev.RR):''}</td>
-      <td>${a.SpO2||'-'}${prev?trendArrow(a.SpO2,prev.SpO2):''}</td>
-      <td>E${a.GCS_E||'-'}${prev?trendArrowGcs(a.GCS_E,prev.GCS_E):''} V${a.GCS_V||'-'}${prev?trendArrowGcs(a.GCS_V,prev.GCS_V):''} M${a.GCS_M||'-'}${prev?trendArrowGcs(a.GCS_M,prev.GCS_M):''}</td>
+      <td class="${tempCls}">${a.Temp||'-'}${arrowForTemp(a.Temp)}</td>
+      <td class="${bpCls}">${a.BP||'-'}${arrowForSBP(a.BP)}</td>
+      <td class="${prCls}">${a.PR||'-'}${arrowForPR(a.PR)}</td>
+      <td class="${rrCls}">${a.RR||'-'}${arrowForRR(a.RR)}</td>
+      <td class="${spo2Cls}">${a.SpO2||'-'}${arrowForSpO2(a.SpO2)}</td>
+      <td>E${a.GCS_E||'-'} V${a.GCS_V||'-'} M${a.GCS_M||'-'}</td>
       <td>${a.PS||'-'}</td>
-      <td><span class="badge ${newsBadgeClass(a.NEWS)}">${a.NEWS!==''&&a.NEWS!==undefined?a.NEWS:'-'}</span>${prev?trendArrow(a.NEWS,prev.NEWS):''}</td>
+      <td><span class="badge ${newsBadgeClass(a.NEWS)}">${a.NEWS!==''&&a.NEWS!==undefined?a.NEWS:'-'}</span>${arrowForNews(a.NEWS)}</td>
       <td style="max-width:220px;">${a.Notes||''}</td>
       <td>${a.RecordedBy||''}</td>
       <td><button class="btn btn-outline btn-sm" data-edit-assessment="${idx}">แก้ไข</button></td>
@@ -1329,6 +1419,30 @@ document.getElementById('btnAddAssessment').addEventListener('click', async ()=>
 });
 
 // ---------- Edit patient ----------
+// ---------- Quick triage change (จากตารางวอร์ด) ----------
+let quickTriageVN = null;
+
+function openQuickTriageModal(vn){
+  const p = state.patients.find(x=>String(x.VN)===String(vn));
+  if(!p){ toast('ไม่พบข้อมูลผู้ป่วย', true); return; }
+  quickTriageVN = vn;
+  document.getElementById('qtPatientName').textContent = `${p.Name} (HN ${p.HN})`;
+  document.getElementById('qtTriageType').value = p.TriageType || 'E';
+  openModal('modalQuickTriage');
+}
+
+document.getElementById('btnSaveQuickTriage').addEventListener('click', async ()=>{
+  if(!quickTriageVN){ toast('เกิดข้อผิดพลาด', true); return; }
+  const triageType = document.getElementById('qtTriageType').value;
+  try{
+    const res = await apiPost({ action:'updatePatient', vn: quickTriageVN, triageType });
+    if(!res.success) throw new Error(res.error||'บันทึกไม่สำเร็จ');
+    toast('เปลี่ยน Triage สำเร็จ');
+    closeModal('modalQuickTriage');
+    await loadWard();
+  }catch(err){ toast(err.message, true); }
+});
+
 function openEditPatientModal(vn){
   const p = state.patients.find(x=>String(x.VN)===String(vn)) ||
             (state.currentPatient && String(state.currentPatient.VN)===String(vn) ? state.currentPatient : null);
@@ -1566,6 +1680,26 @@ function checkAutoFillFromUrl(){
 }
 
 // ---------- init ----------
+function checkEaTypoWarning(){
+  const temp = document.getElementById('eaTemp').value;
+  const pr = document.getElementById('eaPR').value;
+  const rr = document.getElementById('eaRR').value;
+  const spo2 = document.getElementById('eaSpO2').value;
+  const bp = document.getElementById('eaBP').value;
+  const warnings = checkImplausibleVitals(temp, pr, rr, spo2, bp);
+  const box = document.getElementById('eaTypoWarning');
+  if(warnings.length){
+    box.style.display = '';
+    box.innerHTML = '⚠️ ตรวจสอบการพิมพ์:<br>' + warnings.map(w=>'• '+w).join('<br>');
+  } else {
+    box.style.display = 'none';
+    box.innerHTML = '';
+  }
+}
+['eaTemp','eaPR','eaRR','eaSpO2','eaBP'].forEach(id=>{
+  document.getElementById(id).addEventListener('input', checkEaTypoWarning);
+});
+
 document.getElementById('eaBP').addEventListener('input', ()=>{
   document.getElementById('eaMAP').value = calcMAP(document.getElementById('eaBP').value);
 });
