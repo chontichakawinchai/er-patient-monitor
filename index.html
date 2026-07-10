@@ -1185,11 +1185,13 @@ function describeCriticalReasons(p){
     banner.textContent = `⚠ พบผู้ป่วยวิกฤต ${criticalPatients.length} ราย: ${names} — ทีมช่วยด่วน!`;
     banner.classList.add('show');
 
+    const triageEmoji = { R:'🔴', E:'🟠', U:'🟡', SU:'🟢', N:'🔵' };
     criticalPatients.forEach(p=>{
       if(!state.notifiedCriticalVNs.has(p.VN)){
         const reasons = describeCriticalReasons(p);
+        const emoji = triageEmoji[triageClass(p.TriageType)] || '⚠';
         const soundOk = playAlertSound();
-        const notifyOk = fireDesktopNotification('⚠ พบผู้ป่วยวิกฤต - ทีมช่วยด่วน!', `${p.Name} (HN ${p.HN})${reasons ? '\n'+reasons : ''}`);
+        const notifyOk = fireDesktopNotification(`${emoji} พบผู้ป่วยวิกฤต (${triageClass(p.TriageType)}) - ทีมช่วยด่วน!`, `${p.Name} (HN ${p.HN})${reasons ? '\n'+reasons : ''}`);
         if(soundOk || notifyOk) state.notifiedCriticalVNs.add(p.VN);
       }
     });
@@ -1814,7 +1816,7 @@ loadStaffList();
 checkAutoFillFromUrl();
 setInterval(()=>{
   loadWard(); // รันตลอดไม่ว่าจะอยู่แท็บไหน กันพลาดแจ้งเตือนวิกฤตตอนอยู่หน้าบันทึกผู้ป่วย
-}, 30000);
+}, 15000);
 
 document.addEventListener('visibilitychange', ()=>{
   if(!document.hidden) loadWard(); // เช็คทันทีตอนกลับมาเปิดแท็บนี้ ลดผลจากเบราว์เซอร์หน่วงเวลาตอนแท็บอยู่เบื้องหลัง
