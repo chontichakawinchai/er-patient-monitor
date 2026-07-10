@@ -1788,6 +1788,10 @@ checkAutoFillFromUrl();
 setInterval(()=>{
   loadWard(); // รันตลอดไม่ว่าจะอยู่แท็บไหน กันพลาดแจ้งเตือนวิกฤตตอนอยู่หน้าบันทึกผู้ป่วย
 }, 30000);
+
+document.addEventListener('visibilitychange', ()=>{
+  if(!document.hidden) loadWard(); // เช็คทันทีตอนกลับมาเปิดแท็บนี้ ลดผลจากเบราว์เซอร์หน่วงเวลาตอนแท็บอยู่เบื้องหลัง
+});
 </script>
 </body>
 </html>
