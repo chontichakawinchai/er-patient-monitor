@@ -140,7 +140,10 @@
     <h1>ER Patient Monitor</h1>
     <div class="sub">ระบบติดตามอาการผู้ป่วย ER</div>
   </div>
-  <div id="connStatus" class="conn">กำลังเชื่อมต่อ...</div>
+  <div style="display:flex;align-items:center;gap:10px;">
+    <button id="btnEnableNotify" class="btn btn-outline btn-sm" style="background:rgba(255,255,255,.15);border-color:rgba(255,255,255,.3);color:#fff;">🔔 เปิดแจ้งเตือนเดสก์ท็อป</button>
+    <div id="connStatus" class="conn">กำลังเชื่อมต่อ...</div>
+  </div>
 </header>
 
 <nav>
@@ -424,7 +427,29 @@ const CONFIG = {
   GAS_URL: 'https://script.google.com/macros/s/AKfycbyDoXBTTm5tbh8c5dYDeTNv-X1yqi4XV-hfozvEaZhCjdK1okZKgdMjcwAST33Vuaqe/exec'
 };
 
-let state = { patients: [], currentVN: null, currentPatient: null, currentAssessments: [], staffList: [], editingAssessment: null, shiftPatients: [] };
+let state = { patients: [], currentVN: null, currentPatient: null, currentAssessments: [], staffList: [], editingAssessment: null, shiftPatients: [], notifiedCriticalVNs: new Set() };
+
+// ---------- Desktop notification ----------
+function requestDesktopNotificationPermission(){
+  if(!('Notification' in window)){
+    toast('เบราว์เซอร์นี้ไม่รองรับการแจ้งเตือนเดสก์ท็อป', true);
+    return;
+  }
+  Notification.requestPermission().then(perm=>{
+    if(perm === 'granted') toast('เปิดการแจ้งเตือนเดสก์ท็อปสำเร็จ');
+    else toast('ไม่ได้รับอนุญาตให้แจ้งเตือน กรุณาเปิดในตั้งค่าเบราว์เซอร์', true);
+  });
+}
+document.getElementById('btnEnableNotify').addEventListener('click', requestDesktopNotificationPermission);
+
+function fireDesktopNotification(title, body){
+  if(!('Notification' in window) || Notification.permission!=='granted') return false;
+  try{
+    const n = new Notification(title, { body });
+    n.onclick = ()=>{ window.focus(); n.close(); };
+    return true;
+  }catch(e){ return false; /* เงียบไว้ถ้าเบราว์เซอร์บล็อก */ }
+}
 
 function toast(msg, isErr){
   const t = document.createElement('div');
@@ -740,6 +765,8 @@ function computeNEWS2AndAlerts(){
   if(parts.RR>=2) alerts.push(`อัตราการหายใจผิดปกติ (${rr} /min)`);
   if(parts.SpO2>=1) alerts.push(`ออกซิเจนในเลือดต่ำ SpO2 ${spo2}%`);
   if(parts.SBP>=2) alerts.push(`ความดันโลหิตซิสโตลิกผิดปกติ (${bp})`);
+  const dbpMatch = String(bp||'').match(/\/(\d+)/);
+  if(dbpMatch && Number(dbpMatch[1])<50) alerts.push(`ความดันโลหิต Diastolic ต่ำมาก (DBP ${dbpMatch[1]})`);
   if(parts.PR>=2) alerts.push(`ชีพจรผิดปกติ (${pr} bpm)`);
   if(parts.Temp>=1) alerts.push(`อุณหภูมิร่างกายผิดปกติ (${temp} °C)`);
   if(parts.Consciousness>=3) alerts.push('ระดับความรู้สึกตัวเปลี่ยนแปลง (ไม่ใช่ Alert เต็ม 15 คะแนน)');
@@ -907,11 +934,11 @@ function parseHosxpText(text){
   m = t.match(/HN[^0-9]{0,40}([0-9]{4,})/i);
   if(m) result.hn = m[1];
 
-  m = t.match(/ชื่อ[-\s]?สกุล\s*[:：]?\s*(.+?)\s+อายุ/);
+  m = t.match(/ชื่อ[-\s]?(?:สกุล)?\s*[:：]?\s*(.+?)(?:\s+อายุ|\r?\n|$)/);
   if(m) result.name = m[1].trim().replace(/\s{2,}/g,' ');
 
   // อายุ อาจตามด้วยคำอธิบายก่อนตัวเลข และอาจไม่มีคำว่า "ปี" ต่อท้ายเสมอไป
-  m = t.match(/อายุ[^0-9]{0,20}([0-9]{1,3})/);
+  m = t.match(/อายุ[^0-9\r\n]{0,20}([0-9]{1,3})/);
   if(m) result.age = m[1];
 
   m = t.match(/CID[^0-9]{0,40}([0-9]{10,13})/i);
@@ -1067,10 +1094,24 @@ function renderWard(){
     return (String(p.Name).toLowerCase().includes(q) || String(p.HN).toLowerCase().includes(q) || String(p.VN).toLowerCase().includes(q));
   });
 
+function monitoringThresholdMinutes(p, newsThreshMin){
+  const triage = triageClass(p.TriageType);
+  if(triage === 'R'){
+    const count = p.assessmentCount || 0;
+    if(count < 4) return 15;
+    if(count < 6) return 30;
+    return 60;
+  }
+  if(triage === 'E') return 30;
+  if(triage === 'U') return 60;
+  return newsThreshMin;
+}
+
   list.forEach(p=>{
     const a = p.latestAssessment;
     const news = a ? a.NEWS : null;
-    const th = newsThresholdMinutes(news);
+    const newsTh = newsThresholdMinutes(news);
+    const th = monitoringThresholdMinutes(p, newsTh);
     const mins = a ? minutesSince(a.Timestamp) : minutesSince(p.CreatedAt);
     p._overdue = (th!=null && mins!=null && mins > th);
     p._newsVal = (news===null||news===undefined||news==='') ? -1 : Number(news);
@@ -1087,6 +1128,23 @@ function renderWard(){
   body.innerHTML = '';
   document.getElementById('wardEmpty').style.display = list.length ? 'none' : '';
 
+function describeCriticalReasons(p){
+  const a = p.latestAssessment;
+  if(!a) return '';
+  const reasons = [];
+  if(a.SpO2!=='' && a.SpO2!==undefined && scoreSpO2(a.SpO2)>=1) reasons.push(`SpO2 ${a.SpO2}%`);
+  const sbpMatch = String(a.BP||'').match(/(\d+)\//);
+  if(sbpMatch && scoreSBP(a.BP)>=1) reasons.push(`SBP ${sbpMatch[1]}`);
+  const dbpMatch = String(a.BP||'').match(/\/(\d+)/);
+  if(dbpMatch && Number(dbpMatch[1])<50) reasons.push(`DBP ${dbpMatch[1]}`);
+  if(a.PR!=='' && a.PR!==undefined && scorePR(a.PR)>=1) reasons.push(`PR ${a.PR}`);
+  if(a.RR!=='' && a.RR!==undefined && scoreRR(a.RR)>=1) reasons.push(`RR ${a.RR}`);
+  if(a.Temp!=='' && a.Temp!==undefined && scoreTemp(a.Temp)>=1) reasons.push(`Temp ${a.Temp}`);
+  const gcsScore = scoreConsciousness(a.GCS_E, a.GCS_V, a.GCS_M);
+  if(gcsScore>=1) reasons.push(`GCS E${a.GCS_E}V${a.GCS_V}M${a.GCS_M}`);
+  return reasons.length ? reasons.join(', ') : '';
+}
+
   // ป้ายแจ้งเตือนผู้ป่วยวิกฤต (เช็คจากผู้ป่วยทั้งหมด ไม่ใช่แค่ที่ค้นหาเจอ)
   const criticalPatients = state.patients.filter(p=>{
     const a = p.latestAssessment;
@@ -1094,12 +1152,27 @@ function renderWard(){
   });
   const banner = document.getElementById('criticalBanner');
   if(criticalPatients.length){
-    const names = criticalPatients.map(p=>`${p.Name} (HN ${p.HN})`).join(', ');
-    banner.textContent = `⚠ พบผู้ป่วยวิกฤต ${criticalPatients.length} ราย: ${names} — สัญญาณชีพผิดปกติรุนแรง ทีมช่วยด่วน!`;
+    const names = criticalPatients.map(p=>{
+      const reasons = describeCriticalReasons(p);
+      return `${p.Name} (HN ${p.HN})${reasons ? ' ['+reasons+']' : ''}`;
+    }).join(' | ');
+    banner.textContent = `⚠ พบผู้ป่วยวิกฤต ${criticalPatients.length} ราย: ${names} — ทีมช่วยด่วน!`;
     banner.classList.add('show');
+
+    criticalPatients.forEach(p=>{
+      if(!state.notifiedCriticalVNs.has(p.VN)){
+        const reasons = describeCriticalReasons(p);
+        const fired = fireDesktopNotification('⚠ พบผู้ป่วยวิกฤต - ทีมช่วยด่วน!', `${p.Name} (HN ${p.HN})${reasons ? '\n'+reasons : ''}`);
+        if(fired) state.notifiedCriticalVNs.add(p.VN);
+      }
+    });
   } else {
     banner.classList.remove('show');
   }
+  const currentCriticalVNs = new Set(criticalPatients.map(p=>p.VN));
+  Array.from(state.notifiedCriticalVNs).forEach(vn=>{
+    if(!currentCriticalVNs.has(vn)) state.notifiedCriticalVNs.delete(vn);
+  });
 
   list.forEach(p=>{
     const a = p.latestAssessment;
@@ -1115,7 +1188,7 @@ function renderWard(){
 
     tr.innerHTML = `
       <td><b>HN ${p.HN}</b></td>
-      <td>${p.Name}${isCritical?'<span class="critical-tag">⚠ วิกฤต</span>':''}<div class="muted">${p.Age||'-'} ปี / ${p.Sex||'-'}</div></td>
+      <td>${p.Name}${isCritical?`<span class="critical-tag" title="${describeCriticalReasons(p).replace(/"/g,'&quot;')}">⚠ วิกฤต</span>`:''}<div class="muted">${p.Age||'-'} ปี / ${p.Sex||'-'}</div></td>
       <td><span class="badge b-tri-${triageClass(p.TriageType)}">${p.TriageType||'-'}</span></td>
       <td>${vitals}</td>
       <td>${gcs}</td>
@@ -1300,7 +1373,7 @@ function extractSBPDBP(bpStr){
 function suggestTriageFromVitals(spo2, rr, hr, bpStr, gcsE, gcsV, gcsM, prevGcsTotal){
   const n = v => (v==='' || v===undefined || v===null) ? null : Number(v);
   const SpO2 = n(spo2), RR = n(rr), HR = n(hr);
-  const { sbp:SBP } = extractSBPDBP(bpStr);
+  const { sbp:SBP, dbp:DBP } = extractSBPDBP(bpStr);
 
   let gcsTotal = null;
   if(gcsE!=='' && gcsE!==undefined && gcsV!=='' && gcsV!==undefined && gcsM!=='' && gcsM!==undefined){
@@ -1312,16 +1385,17 @@ function suggestTriageFromVitals(spo2, rr, hr, bpStr, gcsE, gcsV, gcsM, prevGcsT
   if((SpO2!==null && SpO2<90) ||
      (RR!==null && (RR>=30 || RR<8)) ||
      (HR!==null && (HR>130 || HR<40)) ||
-     (SBP!==null && SBP<90) ||
+     (SBP!==null && SBP<=90) ||
+     (DBP!==null && DBP<50) ||
      (gcsTotal!==null && gcsTotal<=13) ||
      gcsDropped2){
     return 'R';
   }
-  // ระดับ E - โซนเฝ้าระวัง (ตาราง Breathing/Circulation)
-  if((RR!==null && ((RR>=21 && RR<=29) || (RR>=10 && RR<=11))) ||
+  // ระดับ E - โซนเฝ้าระวัง (ตาราง Breathing/Circulation) ปรับให้ต่อเนื่องกับขอบเขต R ไม่มีช่องว่าง
+  if((RR!==null && ((RR>=21 && RR<=29) || (RR>=8 && RR<=11))) ||
      (SpO2!==null && SpO2>=90 && SpO2<=94) ||
-     (SBP!==null && SBP>=90 && SBP<=99) ||
-     (HR!==null && ((HR>=101 && HR<=120) || (HR>=50 && HR<=59))) ||
+     (SBP!==null && SBP>=91 && SBP<=99) ||
+     (HR!==null && ((HR>=101 && HR<=130) || (HR>=40 && HR<=59))) ||
      (gcsTotal!==null && gcsTotal===14)){
     return 'E';
   }
@@ -1712,7 +1786,7 @@ loadWard();
 loadStaffList();
 checkAutoFillFromUrl();
 setInterval(()=>{
-  if(document.getElementById('tab-ward').style.display !== 'none') loadWard();
+  loadWard(); // รันตลอดไม่ว่าจะอยู่แท็บไหน กันพลาดแจ้งเตือนวิกฤตตอนอยู่หน้าบันทึกผู้ป่วย
 }, 30000);
 </script>
 </body>
