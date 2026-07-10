@@ -141,6 +141,7 @@
     <div class="sub">ระบบติดตามอาการผู้ป่วย ER</div>
   </div>
   <div style="display:flex;align-items:center;gap:10px;">
+    <button id="btnTestSound" class="btn btn-outline btn-sm" style="background:rgba(255,255,255,.15);border-color:rgba(255,255,255,.3);color:#fff;">🔊 ทดสอบเสียงเตือน</button>
     <button id="btnEnableNotify" class="btn btn-outline btn-sm" style="background:rgba(255,255,255,.15);border-color:rgba(255,255,255,.3);color:#fff;">🔔 เปิดแจ้งเตือนเดสก์ท็อป</button>
     <div id="connStatus" class="conn">กำลังเชื่อมต่อ...</div>
   </div>
@@ -441,6 +442,31 @@ function requestDesktopNotificationPermission(){
   });
 }
 document.getElementById('btnEnableNotify').addEventListener('click', requestDesktopNotificationPermission);
+document.getElementById('btnTestSound').addEventListener('click', ()=>{
+  const ok = playAlertSound();
+  if(ok) toast('ทดสอบเสียงเตือนแล้ว ถ้าไม่ได้ยิน เช็คเสียงลำโพง/ระดับเสียงเบราว์เซอร์');
+  else toast('เล่นเสียงไม่สำเร็จ เบราว์เซอร์อาจบล็อกไว้', true);
+});
+
+function playAlertSound(){
+  try{
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const now = ctx.currentTime;
+    [0, 0.35, 0.7].forEach(offset=>{
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = 880;
+      gain.gain.setValueAtTime(0.001, now+offset);
+      gain.gain.exponentialRampToValueAtTime(0.4, now+offset+0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, now+offset+0.3);
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.start(now+offset);
+      osc.stop(now+offset+0.32);
+    });
+    return true;
+  }catch(e){ return false; /* เงียบไว้ถ้าเบราว์เซอร์บล็อกเสียง */ }
+}
 
 function fireDesktopNotification(title, body){
   if(!('Notification' in window) || Notification.permission!=='granted') return false;
@@ -1162,8 +1188,9 @@ function describeCriticalReasons(p){
     criticalPatients.forEach(p=>{
       if(!state.notifiedCriticalVNs.has(p.VN)){
         const reasons = describeCriticalReasons(p);
-        const fired = fireDesktopNotification('⚠ พบผู้ป่วยวิกฤต - ทีมช่วยด่วน!', `${p.Name} (HN ${p.HN})${reasons ? '\n'+reasons : ''}`);
-        if(fired) state.notifiedCriticalVNs.add(p.VN);
+        const soundOk = playAlertSound();
+        const notifyOk = fireDesktopNotification('⚠ พบผู้ป่วยวิกฤต - ทีมช่วยด่วน!', `${p.Name} (HN ${p.HN})${reasons ? '\n'+reasons : ''}`);
+        if(soundOk || notifyOk) state.notifiedCriticalVNs.add(p.VN);
       }
     });
   } else {
@@ -1424,19 +1451,19 @@ function checkDeteriorationTrend(prev, curr){
   const warnings = [];
   const prevSBP = Number((String(prev.BP||'').match(/(\d+)\//)||[])[1]);
   const currSBP = Number((String(curr.bp||'').match(/(\d+)\//)||[])[1]);
-  if(!isNaN(prevSBP) && !isNaN(currSBP) && (prevSBP-currSBP) > 20){
-    warnings.push(`ความดันตกลง ${prevSBP-currSBP} mmHg จากรอบก่อน`);
+  if(!isNaN(prevSBP) && !isNaN(currSBP) && (prevSBP-currSBP) > 20 && scoreSBP(curr.bp)>=1){
+    warnings.push(`ความดันตกลง ${prevSBP-currSBP} mmHg จากรอบก่อน (ค่าปัจจุบันเริ่มผิดปกติ)`);
   }
   const prevSpO2 = Number(prev.SpO2), currSpO2 = Number(curr.spo2);
-  if(!isNaN(prevSpO2) && !isNaN(currSpO2) && (prevSpO2-currSpO2) >= 3){
-    warnings.push(`SpO2 ลดลง ${prevSpO2-currSpO2}% จากรอบก่อน`);
+  if(!isNaN(prevSpO2) && !isNaN(currSpO2) && (prevSpO2-currSpO2) >= 3 && scoreSpO2(curr.spo2)>=1){
+    warnings.push(`SpO2 ลดลง ${prevSpO2-currSpO2}% จากรอบก่อน (ค่าปัจจุบันเริ่มผิดปกติ)`);
   }
   const prevHR = Number(prev.PR), currHR = Number(curr.pr);
-  if(!isNaN(prevHR) && !isNaN(currHR) && (currHR-prevHR) > 20){
-    warnings.push(`ชีพจรเพิ่มขึ้น ${currHR-prevHR} ครั้ง/นาที จากรอบก่อน`);
+  if(!isNaN(prevHR) && !isNaN(currHR) && (currHR-prevHR) > 20 && scorePR(curr.pr)>=1){
+    warnings.push(`ชีพจรเพิ่มขึ้น ${currHR-prevHR} ครั้ง/นาที จากรอบก่อน (ค่าปัจจุบันเริ่มผิดปกติ)`);
   }
   const prevNews = Number(prev.NEWS), currNews = Number(curr.news);
-  if(!isNaN(prevNews) && !isNaN(currNews) && (currNews-prevNews) >= 2){
+  if(!isNaN(prevNews) && !isNaN(currNews) && (currNews-prevNews) >= 2 && currNews>0){
     warnings.push(`NEWS2 เพิ่มขึ้น ${currNews-prevNews} คะแนนจากรอบก่อน`);
   }
   return warnings;
