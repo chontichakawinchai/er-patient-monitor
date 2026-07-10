@@ -471,7 +471,7 @@ function playAlertSound(){
 function fireDesktopNotification(title, body){
   if(!('Notification' in window) || Notification.permission!=='granted') return false;
   try{
-    const n = new Notification(title, { body });
+    const n = new Notification(title, { body, requireInteraction: true });
     n.onclick = ()=>{ window.focus(); n.close(); };
     return true;
   }catch(e){ return false; /* เงียบไว้ถ้าเบราว์เซอร์บล็อก */ }
