@@ -7,7 +7,7 @@
 <title>ER Patient Monitor</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js" onerror="var s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.5/JsBarcode.all.min.js';document.head.appendChild(s);"></script>
 <style>
   :root{color-scheme:light;
     --navy:#0b3d59; --navy-dark:#082c40; --teal:#0e7c86; --bg:#f2f5f7; --card:#ffffff;
@@ -1771,7 +1771,7 @@ function buildReportFormHtml(){
       <tr>
         <td style="border:none;padding:0;font-size:13px;font-weight:700;text-align:left;vertical-align:middle;">รายงานแนวทางการประเมินสภาพผู้ป่วยที่มีอาการทรุดลงโดยใช้ NEWs score ในผู้ป่วย Sepsis</td>
         <td style="border:none;padding:0;text-align:right;vertical-align:middle;width:180px;">
-          ${barcode.url ? `<img src="${barcode.url}" style="height:34px;">` : ''}
+          ${barcode.url ? `<img src="${barcode.url}" style="height:34px;">` : (barcode.code ? `<div style="font-size:11px;font-family:monospace;">${barcode.code}</div>` : '')}
         </td>
       </tr>
     </table>
