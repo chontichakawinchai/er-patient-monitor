@@ -7,6 +7,7 @@
 <title>ER Patient Monitor</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
 <style>
   :root{color-scheme:light;
     --navy:#0b3d59; --navy-dark:#082c40; --teal:#0e7c86; --bg:#f2f5f7; --card:#ffffff;
@@ -1698,6 +1699,25 @@ function consciousLabelFromGcs(e,v,m){
   return total===15 ? 'Alert' : 'V,P,or U';
 }
 
+function generateDocBarcodeDataUrl(){
+  try{
+    const now = new Date();
+    const yy = String(now.getFullYear()+543).slice(-2);
+    const mm = String(now.getMonth()+1).padStart(2,'0');
+    const dd = String(now.getDate()).padStart(2,'0');
+    const hh = String(now.getHours()).padStart(2,'0');
+    const mi = String(now.getMinutes()).padStart(2,'0');
+    const ss = String(now.getSeconds()).padStart(2,'0');
+    const code = `${yy}${mm}${dd}${hh}${mi}${ss}`;
+    const canvas = document.createElement('canvas');
+    if(typeof JsBarcode === 'undefined') return { url:'', code };
+    JsBarcode(canvas, code, { format:'CODE128', displayValue:true, fontSize:14, height:40, margin:4 });
+    return { url: canvas.toDataURL('image/png'), code };
+  }catch(e){
+    return { url:'', code:'' };
+  }
+}
+
 function buildReportFormHtml(){
   const p = state.currentPatient;
   const list = state.currentAssessments || [];
@@ -1744,8 +1764,17 @@ function buildReportFormHtml(){
     monitorRows += `<tr>${blankCell.repeat(13)}</tr>`;
   }
 
+  const barcode = generateDocBarcodeDataUrl();
+
   return `
-    <div style="text-align:center;font-weight:700;font-size:13px;margin-bottom:4px;">รายงานแนวทางการประเมินสภาพผู้ป่วยที่มีอาการทรุดลงโดยใช้ NEWs score ในผู้ป่วย Sepsis</div>
+    <table style="border:none;width:100%;margin-bottom:4px;">
+      <tr>
+        <td style="border:none;padding:0;font-size:13px;font-weight:700;text-align:left;vertical-align:middle;">รายงานแนวทางการประเมินสภาพผู้ป่วยที่มีอาการทรุดลงโดยใช้ NEWs score ในผู้ป่วย Sepsis</td>
+        <td style="border:none;padding:0;text-align:right;vertical-align:middle;width:180px;">
+          ${barcode.url ? `<img src="${barcode.url}" style="height:34px;">` : ''}
+        </td>
+      </tr>
+    </table>
     <table style="border:none;width:100%;margin-bottom:6px;">
       <tr>
         <td style="border:none;padding:0;font-size:12px;text-align:left;">ชื่อ-นามสกุล: ${p.Name||'-'} &nbsp; อายุ ${p.Age||'-'} &nbsp; HN ${p.HN||'-'}</td>
